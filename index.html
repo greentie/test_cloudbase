@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>拓扑编排与工单状态管理中台</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background-color: #f5f7fa; color: #333; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+        header { background-color: #1f4e79; color: white; height: 60px; display: flex; justify-content: space-between; align-items: center; padding: 0 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 10; }
+        .logo-area { font-size: 18px; font-weight: bold; }
+        .user-area { font-size: 14px; background: rgba(255,255,255,0.15); padding: 6px 14px; border-radius: 20px; }
+
+        .main-container { flex: 1; display: flex; overflow: hidden; }
+        .sidebar { width: 280px; background-color: white; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; padding: 20px 16px; }
+        .sidebar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #edf2f7; }
+        .sidebar-title { font-size: 16px; font-weight: 700; color: #2d3748; }
+        .project-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+        .project-item { padding: 14px 16px; border: 1px solid #e2e8f0; border-radius: 8px; background-color: #fafbfe; }
+        .project-item.active { border-color: #2f5597; background-color: #e6eefc; }
+
+        .canvas-area { flex: 1; position: relative; background-color: #f8fafc; background-image: radial-gradient(#cbd5e1 1px, transparent 1px); background-size: 20px 20px; display: flex; flex-direction: column; }
+        .canvas-toolbar { position: absolute; top: 20px; left: 24px; right: 24px; background: white; padding: 12px 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); display: flex; justify-content: space-between; align-items: center; z-index: 5; border: 1px solid #e2e8f0; }
+        .toolbar-group { display: flex; gap: 10px; align-items: center; }
+        .action-btn { background-color: #2f5597; color: white; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; }
+        .action-btn.danger { background-color: #ef4444; }
+        .action-btn:disabled { background-color: #cbd5e1; cursor: not-allowed; }
+
+        .svg-canvas { width: 100%; height: 100%; }
+        .node { cursor: grab; }
+        .node:active { cursor: grabbing; }
+        .node circle.selected { stroke: #f59e0b !important; stroke-width: 5px !important; stroke-dasharray: 4; }
+
+        .control-anchor { fill: #f59e0b; stroke: white; stroke-width: 2; cursor: crosshair; opacity: 0; transition: opacity 0.15s; }
+        .node-group:hover .control-anchor { opacity: 1; }
+        .control-anchor:hover { fill: #ef4444; transform: scale(1.3); transform-origin: center; }
+
+        .link-hitbox, .route-hitbox { stroke: transparent; stroke-width: 14; cursor: pointer; fill: none; }
+        .link { stroke: #64748b; stroke-width: 3; fill: none; pointer-events: none; }
+        .link.selected, .link-hitbox:hover + .link { stroke: #f59e0b !important; stroke-width: 4px !important; }
+        .route-path { stroke: #8b5cf6; stroke-width: 3; stroke-dasharray: 6,6; fill: none; pointer-events: none; }
+        .route-path.selected, .route-hitbox:hover + .route-path { stroke: #f59e0b !important; stroke-width: 4px !important; }
+
+        .guide-line { stroke: #ef4444; stroke-width: 2.5; stroke-dasharray: 4,4; fill: none; pointer-events: none; display: none; }
+
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 100; opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
+        .modal-overlay.show { opacity: 1; pointer-events: auto; }
+        .modal-box { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.15); max-width: 440px; width: 90%; }
+        .modal-title { font-size: 16px; font-weight: 700; color: #1e293b; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .modal-body { font-size: 14px; color: #475569; line-height: 1.6; margin-bottom: 20px; }
+        .modal-footer { display: flex; justify-content: flex-end; gap: 10px; }
+        .modal-btn { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; }
+        .modal-btn.cancel { background-color: #f1f5f9; color: #475569; }
+        .modal-btn.confirm { background-color: #2f5597; color: white; }
+        .modal-btn.danger { background-color: #ef4444; color: white; }
+
+        .select-input { width: 100%; padding: 8px; margin-top: 10px; border-radius: 6px; border: 1px solid #cbd5e1; outline: none; }
+
+        .info-tip { position: absolute; bottom: 24px; right: 24px; background: rgba(30, 41, 59, 0.9); color: white; padding: 10px 16px; border-radius: 6px; font-size: 13px; z-index: 5; pointer-events: none; }
+        .legend-card { position: absolute; bottom: 24px; left: 24px; background: white; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; z-index: 5; font-size: 13px; }
+        .legend-title { font-weight: bold; margin-bottom: 6px; color: #475569; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo-area">🌐 网络拓扑向导与审批自动化系统</div>
+        <div class="user-area">👤 <span>username</span></div>
+    </header>
+
+    <div class="main-container">
+        <aside class="sidebar">
+            <div class="sidebar-header"><span class="sidebar-title">Project List</span></div>
+            <div class="project-list">
+                <div class="project-item active"><div class="project-name">project A</div></div>
+            </div>
+        </aside>
+
+        <main class="canvas-area">
+            <div class="canvas-toolbar">
+                <div class="toolbar-group">
+                    <button class="action-btn" onclick="triggerAddNode()">➕ 快捷加节点</button>
+                </div>
+                <div class="toolbar-group">
+                    <button class="action-btn danger" id="btn-delete" onclick="openDeleteModal()" disabled>🗑️ 删除选中项</button>
+                </div>
+            </div>
+
+            <svg class="svg-canvas" id="topo-svg" onclick="clearSelection(event)" onmousemove="handleGlobalMouseMove(event)" onmouseup="handleGlobalMouseUp(event)" onmouseleave="handleGlobalMouseUp(event)">
+                <defs>
+                    <marker id="arrow" viewBox="0 0 10 10" refX="25" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b5cf6"/>
+                    </marker>
+                </defs>
+                <g id="links-group"></g>
+                <g id="routes-group"></g>
+                <line id="dynamic-guide-line" class="guide-line" x1="0" y1="0" x2="0" y2="0" />
+                <g id="nodes-group"></g>
+            </svg>
+
+            <div class="info-tip" id="info-tip">新特性：鼠标悬停至节点，可从【8个橙色控制点】按住并拖拽连线至目标节点拉起审批流程！</div>
+
+            <div class="legend-card">
+                <div class="legend-title">🎨 拓扑连线与控制图例</div>
+                <div style="margin-bottom: 4px;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#f59e0b;"></span> 8向悬停流程控制锚点</div>
+                <div style="margin-bottom: 4px;"><span style="display:inline-block; width:15px; height:3px; background:#64748b;"></span> 实线：网络互通审批策略</div>
+                <div><span style="display:inline-block; width:15px; height:3px; background:#8b5cf6;"></span> 虚线：代理路由开辟规则</div>
+            </div>
+        </main>
+    </div>
+
+    <div class="modal-overlay" id="wf-modal">
+        <div class="modal-box">
+            <div class="modal-title">🚀 触发拉起全新IT网络审批流程</div>
+            <div class="modal-body">
+                检测到您正从节点 <strong id="wf-src">-</strong> 牵引连线至目标 <strong id="wf-target">-</strong>。<br>
+                请选择需要发起的底层云中台单据流类型：
+                <select id="wf-type-select" class="select-input">
+                    <option value="STRATEGY">发起【网络连接/安全防火墙开通】策略工单</option>
+                    <option value="ROUTE">发起【反向代理/网关路由映射】转发流程</option>
+                </select>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-btn cancel" onclick="closeWfModal()">废弃建链</button>
+                <button class="modal-btn confirm" onclick="executeCreateWorkflow()">启动流程审批</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="delete-modal">
+        <div class="modal-box">
+            <div class="modal-title">⚠️ 确认卸载组件提示</div>
+            <div class="modal-body" id="del-modal-text">确认要从拓扑树中彻底销毁选中的元素吗？</div>
+            <div class="modal-footer">
+                <button class="modal-btn cancel" onclick="closeDeleteModal()">取消保持</button>
+                <button class="modal-btn danger" onclick="executeDelete()">确认清退</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let nodes = [
+            { id: "node-1", name: "业务服务器A", x: 380, y: 350 },
+            { id: "node-2", name: "核心数据库B", x: 650, y: 220 }
+        ];
+        let strategies = [];
+        let routes = [];
+
+        let selectedElement = null;
+        let currentMode = 'select';
+
+        let dragLinkActive = false;
+        let linkSourceNodeId = null;
+
+        let draggingNodeId = null;
+        let dragOffsetX = 0, dragOffsetY = 0;
+
+        const svg = document.getElementById('topo-svg');
+        const tip = document.getElementById('info-tip');
+        const delBtn = document.getElementById('btn-delete');
+        const guideLine = document.getElementById('dynamic-guide-line');
+
+        const NODE_RADIUS = 35;
+        const OFFSET = 10;
+
+        function render() {
+            const linksGroup = document.getElementById('links-group');
+            linksGroup.innerHTML = '';
+            strategies.forEach(s => {
+                const from = nodes.find(n => n.id === s.from);
+                const to = nodes.find(n => n.id === s.to);
+                if(from && to) {
+                    const hitbox = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    hitbox.setAttribute("x1", from.x); hitbox.setAttribute("y1", from.y);
+                    hitbox.setAttribute("x2", to.x); hitbox.setAttribute("y2", to.y);
+                    hitbox.setAttribute("class", "link-hitbox");
+                    hitbox.onclick = (e) => { e.stopPropagation(); selectElement('strategy', s.id); };
+
+                    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    line.setAttribute("x1", from.x); line.setAttribute("y1", from.y);
+                    line.setAttribute("x2", to.x); line.setAttribute("y2", to.y);
+                    line.setAttribute("class", `link ${isSelected('strategy', s.id) ? 'selected' : ''}`);
+
+                    linksGroup.appendChild(hitbox); linksGroup.appendChild(line);
+                }
+            });
+
+            const routesGroup = document.getElementById('routes-group');
+            routesGroup.innerHTML = '';
+            routes.forEach(r => {
+                const from = nodes.find(n => n.id === r.from);
+                const to = nodes.find(n => n.id === r.to);
+                if(from && to) {
+                    const hitbox = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    hitbox.setAttribute("x1", from.x); hitbox.setAttribute("y1", from.y);
+                    hitbox.setAttribute("x2", to.x); hitbox.setAttribute("y2", to.y);
+                    hitbox.setAttribute("class", "route-hitbox");
+                    hitbox.onclick = (e) => { e.stopPropagation(); selectElement('route', r.id); };
+
+                    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    line.setAttribute("x1", from.x); line.setAttribute("y1", from.y);
+                    line.setAttribute("x2", to.x); line.setAttribute("y2", to.y);
+                    line.setAttribute("marker-end", "url(#arrow)");
+                    line.setAttribute("class", `route-path ${isSelected('route', r.id) ? 'selected' : ''}`);
+
+                    routesGroup.appendChild(hitbox); routesGroup.appendChild(line);
+                }
+            });
+
+            const nodesGroup = document.getElementById('nodes-group');
+            nodesGroup.innerHTML = '';
+            nodes.forEach(n => {
+                const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                g.setAttribute("class", "node-group");
+
+                const circleg = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                circleg.setAttribute("class", "node");
+                circleg.setAttribute("transform", `translate(${n.x}, ${n.y})`);
+                circleg.onmousedown = (e) => startNodeDrag(e, n.id);
+                circleg.onclick = (e) => { e.stopPropagation(); selectElement('node', n.id); };
+
+                const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                circle.setAttribute("r", NODE_RADIUS);
+                circle.setAttribute("fill", "#38bdf8");
+                circle.setAttribute("stroke", "#0284c7");
+                circle.setAttribute("stroke-width", "3");
+                if(isSelected('node', n.id)) circle.setAttribute("class", "selected");
+
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                text.setAttribute("dy", "5");
+                text.setAttribute("text-anchor", "middle");
+                text.setAttribute("fill", "#ffffff");
+                text.setAttribute("font-size", "12");
+                text.setAttribute("font-weight", "bold");
+                text.style.pointerEvents = "none";
+                text.textContent = n.name;
+
+                circleg.appendChild(circle); circleg.appendChild(text);
+                g.appendChild(circleg);
+
+                const r_ext = NODE_RADIUS + OFFSET;
+                const diag = r_ext * 0.7071;
+
+                const anchors = [
+                    { dx: 0, dy: -r_ext }, { dx: 0, dy: r_ext },
+                    { dx: r_ext, dy: 0 }, { dx: -r_ext, dy: 0 },
+                    { dx: diag, dy: -diag }, { dx: diag, dy: diag },
+                    { dx: -diag, dy: -diag }, { dx: -diag, dy: diag }
+                ];
+
+                anchors.forEach(pos => {
+                    const anchor = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                    anchor.setAttribute("cx", n.x + pos.dx);
+                    anchor.setAttribute("cy", n.y + pos.dy);
+                    anchor.setAttribute("r", "5.5");
+                    anchor.setAttribute("class", "control-anchor");
+                    anchor.onmousedown = (e) => startLinkDrag(e, n.id);
+                    g.appendChild(anchor);
+                });
+
+                nodesGroup.appendChild(g);
+            });
+
+            delBtn.disabled = !selectedElement;
+        }
+
+        function isSelected(type, id) { return selectedElement && selectedElement.type === type && selectedElement.id === id; }
+
+        function startNodeDrag(e, id) {
+            if(currentMode !== 'select') return;
+            e.stopPropagation();
+            draggingNodeId = id;
+            const n = nodes.find(node => node.id === id);
+            const rect = svg.getBoundingClientRect();
+            dragOffsetX = (e.clientX - rect.left) - n.x;
+            dragOffsetY = (e.clientY - rect.top) - n.y;
+        }
+
+        function startLinkDrag(e, srcNodeId) {
+            e.stopPropagation();
+            e.preventDefault();
+            dragLinkActive = true;
+            linkSourceNodeId = srcNodeId;
+            
+            const n = nodes.find(node => node.id === srcNodeId);
+            guideLine.setAttribute("x1", n.x);
+            guideLine.setAttribute("y1", n.y);
+            guideLine.setAttribute("x2", n.x);
+            guideLine.setAttribute("y2", n.y);
+            guideLine.style.display = "block";
+            tip.textContent = "连线中：请按住鼠标，并将红虚线延伸到目标目标节点上松开...";
+        }
+
+        function handleGlobalMouseMove(e) {
+            const rect = svg.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            if (draggingNodeId) {
+                const n = nodes.find(node => node.id === draggingNodeId);
+                n.x = mouseX - dragOffsetX;
+                n.y = mouseY - dragOffsetY;
+                render();
+            }
+
+            if (dragLinkActive) {
+                guideLine.setAttribute("x2", mouseX);
+                guideLine.setAttribute("y2", mouseY);
+            }
+        }
+
+        function handleGlobalMouseUp(e) {
+            draggingNodeId = null;
+
+            if (dragLinkActive) {
+                dragLinkActive = false;
+                guideLine.style.display = "none";
+
+                const rect = svg.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+
+                let targetNodeId = null;
+                nodes.forEach(n => {
+                    const dist = Math.sqrt((mouseX - n.x)**2 + (mouseY - n.y)**2);
+                    if (dist <= NODE_RADIUS + 15) {
+                        targetNodeId = n.id;
+                    }
+                });
+
+                if (targetNodeId && targetNodeId !== linkSourceNodeId) {
+                    openWfModal(linkSourceNodeId, targetNodeId);
+                } else {
+                    tip.textContent = "提示：未精准释放到目标节点上，本次审批流流程拉起撤销。";
+                }
+            }
+        }
+
+        let tempWfSrcId = null, tempWfTargetId = null;
+        function openWfModal(srcId, targetId) {
+            tempWfSrcId = srcId; tempWfTargetId = targetId;
+            const srcNode = nodes.find(n => n.id === srcId);
+            const targetNode = nodes.find(n => n.id === targetId);
+            
+            document.getElementById('wf-src').textContent = `[${srcNode.name}]`;
+            document.getElementById('wf-target').textContent = `[${targetNode.name}]`;
+            document.getElementById('wf-modal').classList.add('show');
+        }
+
+        function closeWfModal() { document.getElementById('wf-modal').classList.remove('show'); }
+
+        function executeCreateWorkflow() {
+            const type = document.getElementById('wf-type-select').value;
+            if(type === 'STRATEGY') {
+                strategies.push({ id: "strat-" + Date.now(), from: tempWfSrcId, to: tempWfTargetId });
+                tip.textContent = "成功：已拉起全新的网络防火墙策略开通审批流！";
+            } else {
+                routes.push({ id: "route-" + Date.now(), from: tempWfSrcId, to: tempWfTargetId });
+                tip.textContent = "成功：已拉起全新的网关反向代理路由规则工单！";
+            }
+            closeWfModal();
+            render();
+        }
+
+        function openDeleteModal() {
+            if(!selectedElement) return;
+            const { type, id } = selectedElement;
+            const textEl = document.getElementById('del-modal-text');
+
+            if(type === 'node') {
+                const n = nodes.find(node => node.id === id);
+                textEl.innerHTML = `确定要销毁节点 <strong>[${n.name}]</strong> 吗？<br><span style="color:#ef4444; font-weight:bold;">⚠️ 注意：</span>删除该节点将级联清理所有挂载在其身上的网络连接和路由流程单据！`;
+            } else {
+                textEl.textContent = `确认要把这条正在流转或生效的流程连线单据从拓扑中彻底清除吗？`;
+            }
+            document.getElementById('delete-modal').classList.add('show');
+        }
+
+        function closeDeleteModal() { document.getElementById('delete-modal').classList.remove('show'); }
+
+        function executeDelete() {
+            if(!selectedElement) return;
+            const { type, id } = selectedElement;
+
+            if (type === 'node') {
+                strategies = strategies.filter(s => s.from !== id && s.to !== id);
+                routes = routes.filter(r => r.from !== id && r.to !== id);
+                nodes = nodes.filter(n => n.id !== id);
+            } else if (type === 'strategy') {
+                strategies = strategies.filter(s => s.id !== id);
+            } else if (type === 'route') {
+                routes = routes.filter(r => r.id !== id);
+            }
+
+            selectedElement = null;
+            closeDeleteModal();
+            tip.textContent = "提示：选定拓扑业务组件已被安全清退。";
+            render();
+        }
+
+        function triggerAddNode() {
+            currentMode = 'add_node';
+            tip.textContent = "请在右侧网格画布【空白区域点击】，添加新物理节点。";
+        }
+
+        function clearSelection(e) {
+            if (currentMode === 'add_node') {
+                const rect = svg.getBoundingClientRect();
+                const name = prompt("请输入新拓扑节点名称:", "核心服务器_" + (nodes.length + 1));
+                if (name) {
+                    nodes.push({ id: "node-" + Date.now(), name: name, x: e.clientX - rect.left, y: e.clientY - rect.top });
+                }
+                currentMode = 'select';
+                tip.textContent = "提示：节点注入成功。";
+            } else {
+                selectedElement = null;
+                tip.textContent = "新特性：鼠标悬停至节点，可从【8个橙色控制点】按住并拖拽连线至目标节点拉起审批流程！";
+            }
+            render();
+        }
+
+        function selectElement(type, id) {
+            selectedElement = { type, id };
+            tip.textContent = `当前锁定了 [${type === 'node' ? '节点' : type === 'strategy' ? '网络互通策略' : '代理路由'}] 组件。`;
+            render();
+        }
+
+        render();
+    </script>
+</body>
+</html>
